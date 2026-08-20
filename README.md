@@ -1,11 +1,9 @@
-# TaskEarn MVP v7 — Admin Login Fix
+# TaskEarn MVP v8 — Admin login fix
 
-This version keeps Worker and Client signup/login behavior while making the configured admin identity authoritative.
+Admin login now works independently of the worker/client role.
 
-Admin behavior:
-- Set `ADMIN_EMAIL` in Render.
-- Optional: set `ADMIN_PASSWORD` to define/reset the admin password.
-- If `ADMIN_PASSWORD` is temporarily absent but the admin email already exists as a user, the existing account password can promote that account to admin on login.
-- A new admin account cannot be created without `ADMIN_PASSWORD`.
+Admin defaults for the test MVP if Render env vars are missing:
+- Email: admin@taskeearn.com
+- Password: TaskEarnAdmin#2026!X9
 
-This is still an MVP with test funds only; no real payments are processed.
+For production, set ADMIN_EMAIL and ADMIN_PASSWORD in Render and change the default password.
