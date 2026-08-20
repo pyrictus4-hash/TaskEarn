@@ -1,41 +1,27 @@
-# TaskEarn — connected MVP
+# TaskEarn MVP v2
 
-This version is a working English-first microtask marketplace prototype with a real SQLite database and backend API using Python's standard library (no external packages required).
+English-first microtask marketplace prototype.
 
-## Run
+## Included
+- Worker and client registration/login
+- Persistent sessions in SQLite
+- Worker task marketplace
+- Worker earnings summary and ledger
+- Task submissions and client review
+- Client wallet and funded task creation
+- Task quantity/budget tracking
+- Automatic worker credit after client approval
+- Basic responsive UI
 
+## Demo accounts
+- Worker: worker@taskeearn.demo / demo123
+- Client: client@taskeearn.demo / demo123
+
+## Run locally
 ```bash
 python server.py
 ```
+Open `http://127.0.0.1:8091`.
 
-Open: http://127.0.0.1:8080
-
-## Demo accounts
-
-Worker: `worker@taskeearn.demo` / `demo123`
-Client: `client@taskeearn.demo` / `demo123`
-
-## Connected flows
-
-- Registration + login
-- Worker/client roles
-- SQLite persistence
-- Task marketplace and filters
-- Worker starts task
-- Worker submits answer
-- Client can create tasks and review submissions through API
-- Approved submissions credit the worker balance and create a ledger entry
-
-## API
-
-GET `/api/tasks`
-POST `/api/register`
-POST `/api/login`
-GET `/api/me`
-POST `/api/tasks/start`
-POST `/api/tasks/submit`
-POST `/api/client/tasks`
-GET `/api/client/tasks`
-POST `/api/client/review`
-
-This is an MVP/test environment. It does **not** process real cash payouts, KYC, fraud detection, production CSRF/session hardening, or payment-provider transfers yet.
+## Production note
+This MVP uses SQLite for simplicity. For real traffic and durable production storage, migrate to PostgreSQL before onboarding large numbers of users. Add a production secret/session strategy, HTTPS, rate limiting, CSRF protection, email verification, password reset, audit logging, moderation, and a real payment provider before taking real money.
