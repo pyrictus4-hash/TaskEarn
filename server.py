@@ -210,8 +210,9 @@ class H(BaseHTTPRequestHandler):
             if p == '/api/admin/tasks': return self.admin_tasks()
             if p == '/api/admin/submissions': return self.admin_submissions()
             if p == '/api/admin/ledger': return self.admin_ledger()
-            if p in ('/','/styles.css','/app.js'):
-                return self.file('index.html' if p=='/' else p.lstrip('/'))
+            if p in ('/','/styles.css','/app.js','/admin','/admin.html','/admin.js','/admin.css'):
+                fname = {'/':'index.html','/admin':'admin.html','/admin.html':'admin.html','/admin.js':'admin.js','/admin.css':'admin.css'}.get(p,p.lstrip('/'))
+                return self.file(fname)
             return json_out(self, {'error':'Not found'},404)
         except Exception as e:
             print('GET error:', repr(e))
@@ -222,6 +223,7 @@ class H(BaseHTTPRequestHandler):
         routes = {
             '/api/register': self.register,
             '/api/login': self.login,
+            '/api/admin/login': self.admin_login,
             '/api/logout': self.logout,
             '/api/tasks/start': self.start,
             '/api/tasks/submit': self.submit,
@@ -265,6 +267,26 @@ class H(BaseHTTPRequestHandler):
             c.close(); return json_out(self, {'error':'That email is already registered.'},409)
         c.close()
         return self._login_uid(uid)
+
+    def admin_login(self):
+        d=body(self)
+        email=d.get('email','').strip().lower()
+        password=d.get('password','')
+        admin_email=os.getenv('ADMIN_EMAIL','admin@taskeearn.com').strip().lower()
+        admin_password=os.getenv('ADMIN_PASSWORD','TaskEarnAdmin#2026!X9')
+        if not admin_email or email != admin_email or not admin_password or password != admin_password:
+            return json_out(self, {'error':'Invalid admin credentials.'},401)
+        c=db()
+        u=c.execute('SELECT * FROM users WHERE email=?',(admin_email,)).fetchone()
+        if u:
+            c.execute("UPDATE users SET role='admin', password_hash=?, is_active=1 WHERE id=?",(pw_hash(admin_password),u['id']))
+            uid=u['id']
+        else:
+            c.execute('INSERT INTO users(email,password_hash,role,is_active) VALUES(?,?,?,1)',(admin_email,pw_hash(admin_password),'admin'))
+            uid=c.execute('SELECT last_insert_rowid() id').fetchone()['id']
+        c.commit(); c.close()
+        token=issue_session(uid)
+        return json_out(self, {'token':token,'user':{'email':admin_email,'role':'admin'}})
 
     def login(self):
         d=body(self)
