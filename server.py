@@ -255,10 +255,28 @@ class H(BaseHTTPRequestHandler):
         return self._login_uid(uid)
 
     def login(self):
-        d=body(self); c=db(); u=c.execute('SELECT * FROM users WHERE email=? AND is_active=1',(d.get('email','').strip().lower(),)).fetchone(); c.close()
-        if not u or not pw_check(d.get('password',''),u['password_hash']):
-            return json_out(self, {'error':'Invalid email or password.'},401)
-        return self._login_uid(u['id'])
+        d=body(self); email=d.get('email','').strip().lower(); password=d.get('password','')
+        admin_email=os.getenv('ADMIN_EMAIL','').strip().lower()
+        admin_password=os.getenv('ADMIN_PASSWORD','')
+        c=db()
+        u=c.execute('SELECT * FROM users WHERE email=? AND is_active=1',(email,)).fetchone()
+        # Treat the configured admin credentials as authoritative. This also repairs
+        # an existing account that was accidentally created as a worker/client.
+        if admin_email and admin_password and email==admin_email and password==admin_password and len(admin_password)>=10:
+            if u:
+                c.execute("UPDATE users SET role='admin', is_active=1, password_hash=? WHERE id=?",(pw_hash(admin_password),u['id']))
+                c.commit()
+            else:
+                c.execute('INSERT INTO users(email,password_hash,role,balance_cents,is_active) VALUES(?,?,?,?,1)',(admin_email,pw_hash(admin_password),'admin',0))
+                c.commit()
+                u=c.execute('SELECT * FROM users WHERE email=? AND is_active=1',(email,)).fetchone()
+        else:
+            u=c.execute('SELECT * FROM users WHERE email=? AND is_active=1',(email,)).fetchone()
+            if not u or not pw_check(password,u['password_hash']):
+                c.close(); return json_out(self, {'error':'Invalid email or password.'},401)
+        uid=u['id']
+        c.close()
+        return self._login_uid(uid)
 
     def _login_uid(self,uid):
         token=issue_session(uid); c=db(); u=c.execute('SELECT id,email,role,balance_cents,is_active FROM users WHERE id=?',(uid,)).fetchone(); c.close()

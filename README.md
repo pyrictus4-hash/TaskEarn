@@ -22,3 +22,9 @@ After saving the variables, redeploy the service. The admin account will be crea
 ## Notes
 - Test funds remain test-only; no real payment processor is connected.
 - The current MVP still uses SQLite. PostgreSQL should be the next production hardening step before real users and real money.
+
+
+### v5 admin fix
+- Admin credentials from Render environment are authoritative at login.
+- Existing admin email accidentally stored as worker/client is promoted to admin automatically.
+- Admin login navigates to the Admin panel.
