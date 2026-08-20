@@ -106,9 +106,14 @@ def init_db():
     if admin_email and admin_password and len(admin_password)>=10 and '@' in admin_email:
         existing=c.execute('SELECT id FROM users WHERE email=?',(admin_email,)).fetchone()
         if not existing:
-            c.execute('INSERT INTO users(email,password_hash,role,balance_cents,is_active) VALUES(?,?,?,?,1)',(admin_email,pw_hash(admin_password),'admin',0))
+            c.execute('INSERT INTO users(email,password_hash,role,balance_cents,is_active) VALUES(?,?,?,?,1)',
+                      (admin_email,pw_hash(admin_password),'admin',0))
         else:
-            c.execute("UPDATE users SET role='admin', is_active=1 WHERE email=?",(admin_email,))
+            # The configured admin identity is authoritative. This upgrades an
+            # accidentally-created worker/client account and synchronizes its
+            # password with the Render ADMIN_PASSWORD secret.
+            c.execute("UPDATE users SET password_hash=?, role='admin', is_active=1 WHERE email=?",
+                      (pw_hash(admin_password), admin_email))
     c.commit(); c.close()
 
 
@@ -244,6 +249,9 @@ class H(BaseHTTPRequestHandler):
         d=body(self); email=d.get('email','').strip().lower(); password=d.get('password',''); role=d.get('role','worker')
         if role not in ('worker','client'): role='worker'
         if '@' not in email or len(password)<6: return json_out(self, {'error':'Enter a valid email and a password with at least 6 characters.'},400)
+        admin_email=os.getenv('ADMIN_EMAIL','').strip().lower()
+        if admin_email and email==admin_email:
+            return json_out(self, {'error':'This email is reserved for the admin. Use Log in with the configured admin password.'},409)
         c=db()
         try:
             c.execute('INSERT INTO users(email,password_hash,role,is_active) VALUES(?,?,?,1)',(email,pw_hash(password),role))
@@ -255,28 +263,32 @@ class H(BaseHTTPRequestHandler):
         return self._login_uid(uid)
 
     def login(self):
-        d=body(self); email=d.get('email','').strip().lower(); password=d.get('password','')
+        d=body(self)
+        email=d.get('email','').strip().lower()
+        password=d.get('password','')
+
+        # The Render-configured admin credentials always map to the admin role,
+        # even if this email was previously registered as a worker/client.
         admin_email=os.getenv('ADMIN_EMAIL','').strip().lower()
         admin_password=os.getenv('ADMIN_PASSWORD','')
-        c=db()
-        u=c.execute('SELECT * FROM users WHERE email=? AND is_active=1',(email,)).fetchone()
-        # Treat the configured admin credentials as authoritative. This also repairs
-        # an existing account that was accidentally created as a worker/client.
-        if admin_email and admin_password and email==admin_email and password==admin_password and len(admin_password)>=10:
+        if admin_email and admin_password and email==admin_email and password==admin_password:
+            c=db()
+            u=c.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
             if u:
-                c.execute("UPDATE users SET role='admin', is_active=1, password_hash=? WHERE id=?",(pw_hash(admin_password),u['id']))
-                c.commit()
+                c.execute("UPDATE users SET role='admin', password_hash=?, is_active=1 WHERE id=?",
+                          (pw_hash(admin_password), u['id']))
+                uid=u['id']
             else:
-                c.execute('INSERT INTO users(email,password_hash,role,balance_cents,is_active) VALUES(?,?,?,?,1)',(admin_email,pw_hash(admin_password),'admin',0))
-                c.commit()
-                u=c.execute('SELECT * FROM users WHERE email=? AND is_active=1',(email,)).fetchone()
-        else:
-            u=c.execute('SELECT * FROM users WHERE email=? AND is_active=1',(email,)).fetchone()
-            if not u or not pw_check(password,u['password_hash']):
-                c.close(); return json_out(self, {'error':'Invalid email or password.'},401)
-        uid=u['id']
-        c.close()
-        return self._login_uid(uid)
+                c.execute('INSERT INTO users(email,password_hash,role,is_active) VALUES(?,?,?,1)',
+                          (email,pw_hash(admin_password),'admin'))
+                uid=c.execute('SELECT last_insert_rowid() id').fetchone()['id']
+            c.commit(); c.close()
+            return self._login_uid(uid)
+
+        c=db(); u=c.execute('SELECT * FROM users WHERE email=? AND is_active=1',(email,)).fetchone(); c.close()
+        if not u or not pw_check(password,u['password_hash']):
+            return json_out(self, {'error':'Invalid email or password.'},401)
+        return self._login_uid(u['id'])
 
     def _login_uid(self,uid):
         token=issue_session(uid); c=db(); u=c.execute('SELECT id,email,role,balance_cents,is_active FROM users WHERE id=?',(uid,)).fetchone(); c.close()

@@ -24,7 +24,5 @@ After saving the variables, redeploy the service. The admin account will be crea
 - The current MVP still uses SQLite. PostgreSQL should be the next production hardening step before real users and real money.
 
 
-### v5 admin fix
-- Admin credentials from Render environment are authoritative at login.
-- Existing admin email accidentally stored as worker/client is promoted to admin automatically.
-- Admin login navigates to the Admin panel.
+## Admin login behavior (v6)
+The Render `ADMIN_EMAIL` + `ADMIN_PASSWORD` pair is authoritative. Even if the email previously existed as a worker/client, a successful admin login upgrades it to `admin` and routes directly to the Admin Control Center. The admin email is reserved and cannot be registered through the normal sign-up form.
