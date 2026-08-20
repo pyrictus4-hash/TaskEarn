@@ -103,17 +103,21 @@ def init_db():
         c.execute('UPDATE users SET balance_cents=10000 WHERE id=?',(client_id,))
     admin_email=os.getenv('ADMIN_EMAIL','').strip().lower()
     admin_password=os.getenv('ADMIN_PASSWORD','')
-    if admin_email and admin_password and len(admin_password)>=10 and '@' in admin_email:
+    if admin_email and '@' in admin_email:
         existing=c.execute('SELECT id FROM users WHERE email=?',(admin_email,)).fetchone()
         if not existing:
-            c.execute('INSERT INTO users(email,password_hash,role,balance_cents,is_active) VALUES(?,?,?,?,1)',
-                      (admin_email,pw_hash(admin_password),'admin',0))
+            # Creating the admin automatically requires ADMIN_PASSWORD. If it is
+            # not configured yet, the admin can still be promoted at first login
+            # using the password of an existing account with ADMIN_EMAIL.
+            if admin_password:
+                c.execute('INSERT INTO users(email,password_hash,role,balance_cents,is_active) VALUES(?,?,?,?,1)',
+                          (admin_email,pw_hash(admin_password),'admin',0))
         else:
-            # The configured admin identity is authoritative. This upgrades an
-            # accidentally-created worker/client account and synchronizes its
-            # password with the Render ADMIN_PASSWORD secret.
-            c.execute("UPDATE users SET password_hash=?, role='admin', is_active=1 WHERE email=?",
-                      (pw_hash(admin_password), admin_email))
+            # Do not overwrite an existing password unless ADMIN_PASSWORD is set.
+            # This prevents a missing Render secret from locking the admin out.
+            c.execute("UPDATE users SET role='admin', is_active=1 WHERE email=?", (admin_email,))
+            if admin_password:
+                c.execute("UPDATE users SET password_hash=? WHERE email=?", (pw_hash(admin_password), admin_email))
     c.commit(); c.close()
 
 
@@ -267,18 +271,27 @@ class H(BaseHTTPRequestHandler):
         email=d.get('email','').strip().lower()
         password=d.get('password','')
 
-        # The Render-configured admin credentials always map to the admin role,
-        # even if this email was previously registered as a worker/client.
+        # Admin login is authoritative for the configured ADMIN_EMAIL.
+        # If ADMIN_PASSWORD is configured, it is accepted and becomes the stored
+        # admin password. If it is not configured, an already-existing account's
+        # password can be used once to promote that account to admin.
         admin_email=os.getenv('ADMIN_EMAIL','').strip().lower()
         admin_password=os.getenv('ADMIN_PASSWORD','')
-        if admin_email and admin_password and email==admin_email and password==admin_password:
-            c=db()
-            u=c.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
+        if admin_email and email==admin_email:
+            c=db(); u=c.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone()
             if u:
-                c.execute("UPDATE users SET role='admin', password_hash=?, is_active=1 WHERE id=?",
-                          (pw_hash(admin_password), u['id']))
+                valid = (bool(admin_password) and password==admin_password) or pw_check(password,u['password_hash'])
+                if not valid:
+                    c.close(); return json_out(self, {'error':'Invalid admin password.'},401)
+                if admin_password and password==admin_password:
+                    stored_hash=pw_hash(admin_password)
+                else:
+                    stored_hash=u['password_hash']
+                c.execute("UPDATE users SET role='admin', password_hash=?, is_active=1 WHERE id=?", (stored_hash,u['id']))
                 uid=u['id']
             else:
+                if not admin_password or password!=admin_password:
+                    c.close(); return json_out(self, {'error':'Admin account is not initialized. Set ADMIN_PASSWORD in Render, then log in again.'},503)
                 c.execute('INSERT INTO users(email,password_hash,role,is_active) VALUES(?,?,?,1)',
                           (email,pw_hash(admin_password),'admin'))
                 uid=c.execute('SELECT last_insert_rowid() id').fetchone()['id']

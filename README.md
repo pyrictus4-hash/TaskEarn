@@ -1,28 +1,11 @@
-# TaskEarn MVP v4 — Admin Control Center
+# TaskEarn MVP v7 — Admin Login Fix
 
-This version adds an admin-only control center to the existing TaskEarn MVP.
+This version keeps Worker and Client signup/login behavior while making the configured admin identity authoritative.
 
-## New features
-- Admin account bootstrap from `ADMIN_EMAIL` + `ADMIN_PASSWORD` environment variables
-- Admin dashboard with platform metrics
-- User list with enable/disable controls
-- Global task moderation: pause, resume, close
-- Global pending-submission review: approve/reject
-- Recent platform ledger view
-- Active/inactive user enforcement for login and sessions
+Admin behavior:
+- Set `ADMIN_EMAIL` in Render.
+- Optional: set `ADMIN_PASSWORD` to define/reset the admin password.
+- If `ADMIN_PASSWORD` is temporarily absent but the admin email already exists as a user, the existing account password can promote that account to admin on login.
+- A new admin account cannot be created without `ADMIN_PASSWORD`.
 
-## Render environment variables
-Set these on the TaskEarn Web Service:
-
-- `ADMIN_EMAIL` — e.g. `admin@taskeearn.com`
-- `ADMIN_PASSWORD` — use a strong password of at least 10 characters
-
-After saving the variables, redeploy the service. The admin account will be created/updated automatically.
-
-## Notes
-- Test funds remain test-only; no real payment processor is connected.
-- The current MVP still uses SQLite. PostgreSQL should be the next production hardening step before real users and real money.
-
-
-## Admin login behavior (v6)
-The Render `ADMIN_EMAIL` + `ADMIN_PASSWORD` pair is authoritative. Even if the email previously existed as a worker/client, a successful admin login upgrades it to `admin` and routes directly to the Admin Control Center. The admin email is reserved and cannot be registered through the normal sign-up form.
+This is still an MVP with test funds only; no real payments are processed.
