@@ -1,27 +1,27 @@
-# TaskEarn MVP v2
+# TaskEarn MVP v3
 
-English-first microtask marketplace prototype.
+English-first microtask marketplace MVP.
 
-## Included
-- Worker and client registration/login
-- Persistent sessions in SQLite
+## Current features
+- Worker / Client registration and login
+- Sessions and password hashing
 - Worker task marketplace
-- Worker earnings summary and ledger
-- Task submissions and client review
-- Client wallet and funded task creation
-- Task quantity/budget tracking
-- Automatic worker credit after client approval
-- Basic responsive UI
+- Task start and submission flow
+- Client task creation with quantity + reward
+- Client funded-task budget checks
+- Client submission review: approve / reject
+- Worker balance + ledger credits on approval
+- Client wallet with clearly labeled **test funds**
+- Test funds endpoint credits the client wallet without processing real payments
 
-## Demo accounts
-- Worker: worker@taskeearn.demo / demo123
-- Client: client@taskeearn.demo / demo123
+## Test wallet
+Client accounts can add $10 test funds from the Client Dashboard. This is for development only and does **not** charge a card or move real money.
 
-## Run locally
-```bash
-python server.py
-```
-Open `http://127.0.0.1:8091`.
-
-## Production note
-This MVP uses SQLite for simplicity. For real traffic and durable production storage, migrate to PostgreSQL before onboarding large numbers of users. Add a production secret/session strategy, HTTPS, rate limiting, CSRF protection, email verification, password reset, audit logging, moderation, and a real payment provider before taking real money.
+## Production next steps
+- PostgreSQL instead of SQLite
+- Real payment provider + webhook verification
+- Withdrawals / payouts
+- Admin moderation
+- Worker qualifications and quality scoring
+- Rate limiting, CSRF/session hardening, audit logs
+- Email verification and password reset

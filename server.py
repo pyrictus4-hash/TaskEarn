@@ -201,6 +201,7 @@ class H(BaseHTTPRequestHandler):
             '/api/tasks/submit': self.submit,
             '/api/client/tasks': self.create_task,
             '/api/client/review': self.review,
+            '/api/client/test-funds': self.add_test_funds,
         }
         if p not in routes:
             return json_out(self, {'error':'Not found'},404)
@@ -304,6 +305,25 @@ class H(BaseHTTPRequestHandler):
         c=db(); rows=[dict(r) for r in c.execute('SELECT amount_cents,kind,note,created_at FROM ledger WHERE user_id=? ORDER BY id DESC LIMIT 50',(u['id'],)).fetchall()]; c.close()
         for r in rows: r['amount']=money(r['amount_cents'])
         return json_out(self, {'entries':rows})
+
+    def add_test_funds(self):
+        u=auth(self)
+        if not u or u['role']!='client':
+            return json_out(self, {'error':'Client login required.'},401)
+        d=body(self)
+        try:
+            cents=int(round(float(d.get('amount',10))*100))
+        except Exception:
+            return json_out(self, {'error':'Invalid test fund amount.'},400)
+        if cents < 100 or cents > 10000:
+            return json_out(self, {'error':'Test funding must be between $1 and $100.'},400)
+        c=db(); c.execute('BEGIN IMMEDIATE')
+        c.execute("UPDATE users SET balance_cents=balance_cents+? WHERE id=? AND role='client'",(cents,u['id']))
+        c.execute('INSERT INTO ledger(user_id,amount_cents,kind,note) VALUES(?,?,?,?)',(u['id'],cents,'test_funding','Test wallet credit — no real payment processed'))
+        c.commit()
+        new_balance=c.execute('SELECT balance_cents FROM users WHERE id=?',(u['id'],)).fetchone()['balance_cents']
+        c.close()
+        return json_out(self, {'ok':True,'added_cents':cents,'balance_cents':new_balance,'test_only':True})
 
     def create_task(self):
         u=auth(self)
