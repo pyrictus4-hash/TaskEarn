@@ -1,27 +1,24 @@
-# TaskEarn MVP v3
+# TaskEarn MVP v4 — Admin Control Center
 
-English-first microtask marketplace MVP.
+This version adds an admin-only control center to the existing TaskEarn MVP.
 
-## Current features
-- Worker / Client registration and login
-- Sessions and password hashing
-- Worker task marketplace
-- Task start and submission flow
-- Client task creation with quantity + reward
-- Client funded-task budget checks
-- Client submission review: approve / reject
-- Worker balance + ledger credits on approval
-- Client wallet with clearly labeled **test funds**
-- Test funds endpoint credits the client wallet without processing real payments
+## New features
+- Admin account bootstrap from `ADMIN_EMAIL` + `ADMIN_PASSWORD` environment variables
+- Admin dashboard with platform metrics
+- User list with enable/disable controls
+- Global task moderation: pause, resume, close
+- Global pending-submission review: approve/reject
+- Recent platform ledger view
+- Active/inactive user enforcement for login and sessions
 
-## Test wallet
-Client accounts can add $10 test funds from the Client Dashboard. This is for development only and does **not** charge a card or move real money.
+## Render environment variables
+Set these on the TaskEarn Web Service:
 
-## Production next steps
-- PostgreSQL instead of SQLite
-- Real payment provider + webhook verification
-- Withdrawals / payouts
-- Admin moderation
-- Worker qualifications and quality scoring
-- Rate limiting, CSRF/session hardening, audit logs
-- Email verification and password reset
+- `ADMIN_EMAIL` — e.g. `admin@taskeearn.com`
+- `ADMIN_PASSWORD` — use a strong password of at least 10 characters
+
+After saving the variables, redeploy the service. The admin account will be created/updated automatically.
+
+## Notes
+- Test funds remain test-only; no real payment processor is connected.
+- The current MVP still uses SQLite. PostgreSQL should be the next production hardening step before real users and real money.

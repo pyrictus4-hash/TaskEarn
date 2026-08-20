@@ -69,6 +69,10 @@ def init_db():
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     ''')
+    cols=[r['name'] for r in c.execute('PRAGMA table_info(users)').fetchall()]
+    if 'is_active' not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+
     if c.execute('SELECT COUNT(*) n FROM users').fetchone()['n'] == 0:
         worker_pw = pw_hash('demo123')
         client_pw = pw_hash('demo123')
@@ -97,6 +101,14 @@ def init_db():
                   (client_id,10000,'credit','Demo client wallet'))
         # Demo funding ledger entries above are informational; reset client wallet to 5000 for demo.
         c.execute('UPDATE users SET balance_cents=10000 WHERE id=?',(client_id,))
+    admin_email=os.getenv('ADMIN_EMAIL','').strip().lower()
+    admin_password=os.getenv('ADMIN_PASSWORD','')
+    if admin_email and admin_password and len(admin_password)>=10 and '@' in admin_email:
+        existing=c.execute('SELECT id FROM users WHERE email=?',(admin_email,)).fetchone()
+        if not existing:
+            c.execute('INSERT INTO users(email,password_hash,role,balance_cents,is_active) VALUES(?,?,?,?,1)',(admin_email,pw_hash(admin_password),'admin',0))
+        else:
+            c.execute("UPDATE users SET role='admin', is_active=1 WHERE email=?",(admin_email,))
     c.commit(); c.close()
 
 
@@ -148,7 +160,7 @@ def auth(h):
         return None
     c = db()
     row = c.execute('''SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id
-                       WHERE s.token_hash=? AND s.expires_at>?''', (token_hash(token), int(time.time()))).fetchone()
+                       WHERE s.token_hash=? AND s.expires_at>? AND u.is_active=1''', (token_hash(token), int(time.time()))).fetchone()
     c.close()
     return row
 
@@ -166,7 +178,7 @@ def money(cents):
 
 def safe_user(u):
     if not u: return None
-    return {'id':u['id'],'email':u['email'],'role':u['role'],'balance_cents':u['balance_cents']}
+    return {'id':u['id'],'email':u['email'],'role':u['role'],'balance_cents':u['balance_cents'],'is_active':bool(u['is_active']) if 'is_active' in u.keys() else True}
 
 
 class H(BaseHTTPRequestHandler):
@@ -184,6 +196,11 @@ class H(BaseHTTPRequestHandler):
             if p == '/api/client/overview': return self.client_overview()
             if p == '/api/client/tasks': return self.client_tasks()
             if p == '/api/client/submissions': return self.client_submissions()
+            if p == '/api/admin/overview': return self.admin_overview()
+            if p == '/api/admin/users': return self.admin_users()
+            if p == '/api/admin/tasks': return self.admin_tasks()
+            if p == '/api/admin/submissions': return self.admin_submissions()
+            if p == '/api/admin/ledger': return self.admin_ledger()
             if p in ('/','/styles.css','/app.js'):
                 return self.file('index.html' if p=='/' else p.lstrip('/'))
             return json_out(self, {'error':'Not found'},404)
@@ -202,6 +219,9 @@ class H(BaseHTTPRequestHandler):
             '/api/client/tasks': self.create_task,
             '/api/client/review': self.review,
             '/api/client/test-funds': self.add_test_funds,
+            '/api/admin/user-action': self.admin_user_action,
+            '/api/admin/task-action': self.admin_task_action,
+            '/api/admin/review': self.admin_review,
         }
         if p not in routes:
             return json_out(self, {'error':'Not found'},404)
@@ -226,7 +246,7 @@ class H(BaseHTTPRequestHandler):
         if '@' not in email or len(password)<6: return json_out(self, {'error':'Enter a valid email and a password with at least 6 characters.'},400)
         c=db()
         try:
-            c.execute('INSERT INTO users(email,password_hash,role) VALUES(?,?,?)',(email,pw_hash(password),role))
+            c.execute('INSERT INTO users(email,password_hash,role,is_active) VALUES(?,?,?,1)',(email,pw_hash(password),role))
             uid=c.execute('SELECT last_insert_rowid() id').fetchone()['id']
             c.commit()
         except sqlite3.IntegrityError:
@@ -235,13 +255,13 @@ class H(BaseHTTPRequestHandler):
         return self._login_uid(uid)
 
     def login(self):
-        d=body(self); c=db(); u=c.execute('SELECT * FROM users WHERE email=?',(d.get('email','').strip().lower(),)).fetchone(); c.close()
+        d=body(self); c=db(); u=c.execute('SELECT * FROM users WHERE email=? AND is_active=1',(d.get('email','').strip().lower(),)).fetchone(); c.close()
         if not u or not pw_check(d.get('password',''),u['password_hash']):
             return json_out(self, {'error':'Invalid email or password.'},401)
         return self._login_uid(u['id'])
 
     def _login_uid(self,uid):
-        token=issue_session(uid); c=db(); u=c.execute('SELECT id,email,role,balance_cents FROM users WHERE id=?',(uid,)).fetchone(); c.close()
+        token=issue_session(uid); c=db(); u=c.execute('SELECT id,email,role,balance_cents,is_active FROM users WHERE id=?',(uid,)).fetchone(); c.close()
         return json_out(self, {'token':token,'user':dict(u)})
 
     def logout(self):
@@ -393,6 +413,95 @@ class H(BaseHTTPRequestHandler):
             c.execute("UPDATE submissions SET status='rejected',reviewed_at=CURRENT_TIMESTAMP WHERE id=?",(sid,))
         c.commit(); c.close(); return json_out(self, {'ok':True,'status':'approved' if decision=='approve' else 'rejected'})
 
+
+    def _require_admin(self):
+        u=auth(self)
+        if not u or u['role']!='admin':
+            json_out(self, {'error':'Admin login required.'},401)
+            return None
+        return u
+
+    def admin_overview(self):
+        if not self._require_admin(): return
+        c=db()
+        users=c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
+        workers=c.execute("SELECT COUNT(*) n FROM users WHERE role='worker'").fetchone()['n']
+        clients=c.execute("SELECT COUNT(*) n FROM users WHERE role='client'").fetchone()['n']
+        active=c.execute('SELECT COUNT(*) n FROM users WHERE is_active=1').fetchone()['n']
+        tasks=c.execute('SELECT COUNT(*) n FROM tasks').fetchone()['n']
+        open_tasks=c.execute("SELECT COUNT(*) n FROM tasks WHERE status='open'").fetchone()['n']
+        submissions=c.execute('SELECT COUNT(*) n FROM submissions').fetchone()['n']
+        pending=c.execute("SELECT COUNT(*) n FROM submissions WHERE status='pending'").fetchone()['n']
+        credited=c.execute("SELECT COALESCE(SUM(amount_cents),0) n FROM ledger WHERE amount_cents>0 AND kind='credit'").fetchone()['n']
+        funded=c.execute("SELECT COALESCE(-SUM(amount_cents),0) n FROM ledger WHERE kind='task_funding'").fetchone()['n']
+        c.close()
+        return json_out(self, {'users':users,'workers':workers,'clients':clients,'active_users':active,'tasks':tasks,'open_tasks':open_tasks,'submissions':submissions,'pending_submissions':pending,'credited_cents':credited,'funded_cents':funded})
+
+    def admin_users(self):
+        if not self._require_admin(): return
+        c=db(); rows=[dict(r) for r in c.execute('SELECT id,email,role,balance_cents,is_active,created_at FROM users ORDER BY id DESC LIMIT 250').fetchall()]; c.close()
+        for r in rows: r['balance']=money(r['balance_cents'])
+        return json_out(self, {'users':rows})
+
+    def admin_tasks(self):
+        if not self._require_admin(): return
+        c=db(); rows=[dict(r) for r in c.execute("SELECT t.*,u.email client_email FROM tasks t JOIN users u ON u.id=t.client_id ORDER BY t.id DESC LIMIT 250").fetchall()]; c.close()
+        for r in rows:
+            r['reward']=money(r['reward_cents']); r['budget']=money(r['reward_cents']*r['quantity']); r['slots_left']=r['quantity']-r['completed_count']
+        return json_out(self, {'tasks':rows})
+
+    def admin_submissions(self):
+        if not self._require_admin(): return
+        c=db(); rows=[dict(r) for r in c.execute("SELECT s.*,t.title,t.client_id,cu.email client_email,wu.email worker_email FROM submissions s JOIN tasks t ON t.id=s.task_id JOIN users cu ON cu.id=t.client_id JOIN users wu ON wu.id=s.worker_id ORDER BY s.id DESC LIMIT 250").fetchall()]; c.close()
+        for r in rows: r['reward']=money(r['reward_cents'])
+        return json_out(self, {'submissions':rows})
+
+    def admin_ledger(self):
+        if not self._require_admin(): return
+        c=db(); rows=[dict(r) for r in c.execute("SELECT l.*,u.email FROM ledger l JOIN users u ON u.id=l.user_id ORDER BY l.id DESC LIMIT 250").fetchall()]; c.close()
+        for r in rows: r['amount']=money(r['amount_cents'])
+        return json_out(self, {'entries':rows})
+
+    def admin_user_action(self):
+        if not self._require_admin(): return
+        d=body(self); uid=d.get('user_id'); action=d.get('action')
+        if action not in ('disable','enable'): return json_out(self, {'error':'Invalid user action.'},400)
+        c=db(); target=c.execute('SELECT id,email,role,is_active FROM users WHERE id=?',(uid,)).fetchone()
+        if not target: c.close(); return json_out(self, {'error':'User not found.'},404)
+        if target['role']=='admin': c.close(); return json_out(self, {'error':'Admin accounts cannot be disabled here.'},400)
+        active=1 if action=='enable' else 0
+        c.execute('UPDATE users SET is_active=? WHERE id=?',(active,uid))
+        if not active: c.execute('DELETE FROM sessions WHERE user_id=?',(uid,))
+        c.commit(); c.close(); return json_out(self, {'ok':True,'is_active':bool(active)})
+
+    def admin_task_action(self):
+        if not self._require_admin(): return
+        d=body(self); tid=d.get('task_id'); action=d.get('action')
+        if action not in ('pause','resume','close'): return json_out(self, {'error':'Invalid task action.'},400)
+        c=db(); t=c.execute('SELECT id,status,completed_count,quantity FROM tasks WHERE id=?',(tid,)).fetchone()
+        if not t: c.close(); return json_out(self, {'error':'Task not found.'},404)
+        status={'pause':'paused','resume':'open','close':'closed'}[action]
+        if action=='resume' and t['completed_count']>=t['quantity']:
+            c.close(); return json_out(self, {'error':'Completed tasks cannot be reopened.'},400)
+        c.execute('UPDATE tasks SET status=? WHERE id=?',(status,tid)); c.commit(); c.close(); return json_out(self, {'ok':True,'status':status})
+
+    def admin_review(self):
+        if not self._require_admin(): return
+        d=body(self); sid=d.get('submission_id'); decision=d.get('decision')
+        if decision not in ('approve','reject'): return json_out(self, {'error':'Invalid decision.'},400)
+        c=db(); c.execute('BEGIN IMMEDIATE')
+        row=c.execute("SELECT s.*,t.title,t.quantity,t.completed_count FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE s.id=?",(sid,)).fetchone()
+        if not row: c.rollback(); c.close(); return json_out(self, {'error':'Submission not found.'},404)
+        if row['status']!='pending': c.rollback(); c.close(); return json_out(self, {'error':'Submission already reviewed.'},409)
+        if decision=='approve':
+            c.execute("UPDATE submissions SET status='approved',reviewed_at=CURRENT_TIMESTAMP WHERE id=?",(sid,))
+            c.execute('UPDATE users SET balance_cents=balance_cents+? WHERE id=?',(row['reward_cents'],row['worker_id']))
+            c.execute('INSERT INTO ledger(user_id,amount_cents,kind,note) VALUES(?,?,?,?)',(row['worker_id'],row['reward_cents'],'credit','Admin approved task: '+row['title']))
+            n=row['completed_count']+1; status='closed' if n>=row['quantity'] else 'open'
+            c.execute('UPDATE tasks SET completed_count=?,status=? WHERE id=?',(n,status,row['task_id']))
+        else:
+            c.execute("UPDATE submissions SET status='rejected',reviewed_at=CURRENT_TIMESTAMP WHERE id=?",(sid,))
+        c.commit(); c.close(); return json_out(self, {'ok':True,'status':'approved' if decision=='approve' else 'rejected'})
 
 if __name__=='__main__':
     init_db()
